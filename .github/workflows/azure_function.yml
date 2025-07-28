@@ -1,0 +1,111 @@
+name: Azure Function CI/CD
+
+on:
+    push:
+        branches:
+        - main
+    pull_request:
+        branches:
+        - main
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@v2
+
+        - name: Set up Node.js
+          uses: actions/setup-go@v5
+          with:
+            go-version: '^1.13.1'
+
+        - name: Install dependencies
+          run: go mod tidy
+
+        - name: Build the project
+          run: go build
+        
+        - name: Upload build artifact
+          uses: actions/upload-artifact@v2
+          with:
+            name: Todo-Auto-Delete-Function
+            path: ./Todo-Auto-Delete-Function
+
+    unit-test:
+        runs-on: ubuntu-latest
+        needs: build
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@v2
+
+        - name: Set up Node.js
+          uses: actions/setup-go@v5
+          with:
+            go-version: '^1.13.1'
+
+        - name: Run unit tests
+          run: go test -coverprofile=coverage.out
+
+        - name: Upload coverage report
+          uses: actions/upload-artifact@v2
+          with:
+            name: Todo-Auto-Delete-Function-Coverage
+            path: coverage.out
+
+    Code-Quality-Check:
+        name: SonarQube Quality Gate
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
+            # SonarQube Analysis
+            - name: SonarQube Scan
+              uses: SonarSource/sonarqube-scan-action@v5
+              env:
+                SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+                
+            # Upload SonarQube report with minimal retention
+            - name: Upload SonarQube report
+              uses: actions/upload-artifact@v4
+              with:
+                name: sonarqube-report
+                path: .scannerwork/report-task.txt
+                retention-days: 0
+                if-no-files-found: error
+                compression-level: 0
+
+            # Cleanup SonarQube report artifact
+            - name: Delete SonarQube report artifact
+              if: github.event_name == 'pull_request' || github.ref != 'refs/heads/master'
+              uses: geekyeggo/delete-artifact@v5
+              with:
+                name: sonarqube-report
+                failOnError: false
+
+    snyk:
+        runs-on: ubuntu-latest
+        needs: build
+        steps:
+            - name: Check out code
+              uses: actions/checkout@v4
+
+            - name: Download build artifact
+              uses: actions/download-artifact@v4
+              with:
+                name: Todo-Auto-Delete-Function
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                go-version: '^1.13.1'
+
+            - name: Run Snyk to check for vulnerabilities
+              uses: snyk/actions/golang@master
+              env:
+                SNYK_TOKEN: ${{ secrets.SNYK_KEY }}
+              with:
+                command: test
